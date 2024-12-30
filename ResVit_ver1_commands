@@ -1,0 +1,129 @@
+python3 train.py --dataroot Datasets/MRI_CT --name CT_MRI_pre_trained --gpu_ids 0 --model resvit_one --which_model_netG res_cnn --which_direction AtoB --lambda_A 100 --dataset_mode unaligned --norm batch --pool_size 0 --output_nc 1 --input_nc 1 --loadSize 256 --fineSize 256 --niter 50 --niter_decay 50 --save_epoch_freq 5 --checkpoints_dir checkpoints/ --display_id 0 --lr 0.0002
+python3 train.py --dataroot Datasets/MRI_CT --name CT_MRI_resvit --gpu_ids 0 --model resvit_one --which_model_netG resvit --which_direction AtoB --lambda_A 100 --dataset_mode unaligned --norm batch --pool_size 0 --output_nc 1 --input_nc 1 --loadSize 256 --fineSize 256 --niter 25 --niter_decay 25 --save_epoch_freq 5 --checkpoints_dir checkpoints/ --display_id 0 --pre_trained_transformer 1 --pre_trained_resnet 1 --pre_trained_path checkpoints/CT_MRI_pre_trained/latest_net_G.pth --lr 0.001
+python3 test.py --dataroot Datasets/MRI_CT --name CT_MRI_resvit --gpu_ids 0 --model resvit_one --which_model_netG resvit --dataset_mode unaligned --norm batch --phase test --output_nc 1 --input_nc 1 --how_many 125 --serial_batches --fineSize 256 --loadSize 256 --results_dir results/ --checkpoints_dir checkpoints/ --which_epoch latest --pre_trained_path checkpoints/CT_MRI_pre_trained/latest_net_G.pth
+python3 test.py --dataroot Datasets/MRI_CT --name CT_MRI_pre_trained --gpu_ids 0 --model resvit_one --which_model_netG res_cnn --dataset_mode unaligned --norm batch --phase test --output_nc 1 --input_nc 1 --how_many 125 --serial_batches --fineSize 256 --loadSize 256 --results_dir results/ --checkpoints_dir checkpoints/ --which_epoch latest --pre_trained_path checkpoints/CT_MRI_pre_trained/latest_net_G.pth
+
+
+python3 main.py -m srcnn
+python3 super_resolve.py --input_folder /home/souraja/super-resolution/dataset/trainA_less/test/ --output_folder /home/souraja/super-resolution/dataset/trainA_less/HR_images/
+
+
+For DFMIR train/test
+python3 train.py --dataroot /home/souraja/DFMIR/Dataset --input_nc 3 --output_nc 3 --netG stylegan2 --crop_size 512 --load_size 512
+python3 test.py --dataroot /home/souraja/DFMIR/Dataset --input_nc 3 --output_nc 3 --netG stylegan2 --crop_size 512 --load_size 512
+
+For NeMAR train/test
+python3 train.py --dataroot /home/souraja/DFMIR/Dataset --input_nc 3 --output_nc 3 --stn_type unet/affine
+
+
+
+
+ResViT without transformer without gdl: (epoch: 100, iters: 2953, time: 0.074, data: 0.001) G_GAN: 0.609 G_L1: 10.805 D_real: 0.040 D_fake: 0.081 
+ResViT with transformer without gdl: (epoch: 50, iters: 261, time: 0.136, data: 0.001) G_GAN: 0.591 G_L1: 10.988 D_real: 0.195 D_fake: 0.081 
+CT_MRI_resvit(with new loss)
+Epoch   5   l1_avg_loss: 0.08065   mean_psnr: 15.683  std_psnr:1.227 
+
+Epoch  10   l1_avg_loss: 0.08164   mean_psnr: 14.426  std_psnr:1.122 
+
+Epoch  15   l1_avg_loss: 0.08063   mean_psnr: 14.993  std_psnr:1.023 
+
+Epoch  20   l1_avg_loss: 0.08086   mean_psnr: 14.812  std_psnr:0.971 
+
+Epoch  25   l1_avg_loss: 0.07848   mean_psnr: 15.368  std_psnr:1.062 
+
+Epoch  30   l1_avg_loss: 0.08029   mean_psnr: 14.885  std_psnr:1.076 
+
+Epoch  35   l1_avg_loss: 0.07965   mean_psnr: 14.703  std_psnr:1.072 
+
+Epoch  40   l1_avg_loss: 0.07815   mean_psnr: 15.265  std_psnr:1.011 
+
+Epoch  45   l1_avg_loss: 0.07931   mean_psnr: 15.052  std_psnr:1.124 
+
+Epoch  50   l1_avg_loss: 0.07945   mean_psnr: 15.151  std_psnr:1.074 
+class FeatureLoss(nn.Module):
+    def __init__(self, target_real_label=1.0, target_fake_label=0.0, tensor=torch.FloatTensor):
+        super(FeatureLoss, self).__init__()
+        self.feature_extractor = Densepyr().cuda()
+        self.real_label = target_real_label
+        self.fake_label = target_fake_label
+        self.real_label_var = None
+        self.fake_label_var = None
+        self.Tensor = tensor
+
+    def get_target_tensor(self, input, target_is_real):
+        target_tensor = None
+        if target_is_real:
+            create_label = ((self.real_label_var is None) or
+                            (self.real_label_var.numel() != input.numel()))
+            if create_label:
+                real_tensor = self.Tensor(input.size()).fill_(self.real_label)
+                self.real_label_var = torch.autograd.Variable(real_tensor, requires_grad=False)
+            target_tensor = self.real_label_var
+        else:
+            create_label = ((self.fake_label_var is None) or
+                            (self.fake_label_var.numel() != input.numel()))
+            if create_label:
+                fake_tensor = self.Tensor(input.size()).fill_(self.fake_label)
+                self.fake_label_var = torch.autograd.Variable(fake_tensor, requires_grad=False)
+            target_tensor = self.fake_label_var
+        return target_tensor
+
+    def forward(self, target_is_real, realA, realB, fakeB):
+        realA = realA.cuda()
+        realB = realB.cuda()
+        fakeB = fakeB.cuda()
+        feat1 = self.feature_extractor(realA)
+        feat2 = self.feature_extractor(realB)
+        feat3 = self.feature_extractor(fakeB)
+        size=feat1.size()
+        #target_tensor = self.get_target_tensor(input, target_is_real)
+
+        # Calculate non-saturating GAN generator loss using negative log likelihood
+        #if target_is_real:
+            #loss = -torch.log(torch.sigmoid(feat2)).mean()
+        #else:
+            #loss = -torch.log(1 - torch.sigmoid(feat2)).mean()
+        loss = (1/(size[0]*size[1]*size[2]))*((torch.norm(feat2-feat3)**2))
+
+        return loss
+
+class Densepyr(nn.Module):
+    '''
+    feature extractor block 
+    '''
+    def __init__(self):
+        super(Densepyr, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=64, kernel_size=1, stride=1, padding=0).cuda()
+        self.conv_d = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding="same").cuda()
+        self.relu = nn.ReLU()
+        self.down = nn.AvgPool2d(2, 2)
+        self.up = nn.Upsample(scale_factor=2, mode="nearest")
+        self.bnorm1 = nn.BatchNorm2d(num_features=64)
+        
+    def forward(self, x):
+        temp0 = self.conv1(x)
+        skip0 = self.relu(self.up(self.down(x)))
+        attn0 = torch.mul(skip0, temp0)
+        x = x + attn0
+        x = self.bnorm1(x)
+        
+        temp1 = self.conv_d(x) + self.conv_d(self.conv_d(x)) + self.conv_d(self.conv_d(self.conv_d(x)))
+        skip1 = self.relu(self.up(self.down(x)))
+        attn1 = torch.mul(skip1, temp1)
+        attn1 = self.bnorm1(attn1)
+        
+        temp2 = self.conv_d(attn1) + self.conv_d(self.conv_d(attn1)) + self.conv_d(self.conv_d(self.conv_d(attn1)))
+        skip2 = self.relu(self.up(self.down(attn1)))
+        attn2 = torch.mul(skip2, temp2)
+        attn2 = self.bnorm1(attn2)
+        
+        attn2 = attn2 + x
+        
+        temp3 = self.conv_d(attn2) + self.conv_d(self.conv_d(attn2)) + self.conv_d(self.conv_d(self.conv_d(attn2)))
+        skip3 = self.relu(self.up(self.down(attn2)))
+        attn3 = torch.mul(skip3, temp3)
+        attn3 = self.bnorm1(attn3)
+        
+        attn3 = attn3 + attn1
+        
+        return attn3
